@@ -1,16 +1,3 @@
-/**
- * routes/search.js
- * GET /api/search?q=<query>&limit=<n>
- *
- * Searches YouTube via the Invidious public API (no API key needed).
- * Returns an array of track objects with metadata.
- *
- * Invidious is an open-source YouTube frontend — we use it only for
- * search metadata (title, thumbnail, duration). The actual audio
- * comes from yt-dlp, not Invidious.
- *
- * Falls back through multiple Invidious instances if one fails.
- */
 const router = require('express').Router()
 const fetch  = require('node-fetch')
 
@@ -23,37 +10,16 @@ const INSTANCES = [
 
 let instanceIdx = 0
 
-async function searchInvidious(query, limit = 20) {
-  const errors = []
-  for (let i = 0; i < INSTANCES.length; i++) {
-    const base = INSTANCES[(instanceIdx + i) % INSTANCES.length]
-    try {
-      const url = `${base}/api/v1/search?q=${encodeURIComponent(query)}&type=video&fields=videoId,title,author,lengthSeconds,videoThumbnails`
-      const res = await fetch(url, { timeout: 8000 })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      instanceIdx = (instanceIdx + i) % INSTANCES.length // stick to working instance
-      return data
-        .filter(v => v.videoId && v.lengthSeconds > 0 && v.lengthSeconds < 3600)
-        .slice(0, limit)
-        .map(normalise)
-    } catch (err) {
-      errors.push(`${base}: ${err.message}`)
-    }
+// node-fetch v2 doesn't support {timeout} — use AbortController instead
+async function fetchWithTimeout(url, ms = 8000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), ms)
+  try {
+    const res = await fetch(url, { signal: controller.signal })
+    return res
+  } finally {
+    clearTimeout(timer)
   }
-  throw new Error(`All search instances failed: ${errors.join(' | ')}`)
-}
-
-async function getTrending() {
-  const base = INSTANCES[instanceIdx]
-  const url  = `${base}/api/v1/trending?type=music&fields=videoId,title,author,lengthSeconds,videoThumbnails`
-  const res  = await fetch(url, { timeout: 8000 })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const data = await res.json()
-  return data
-    .filter(v => v.videoId && v.lengthSeconds < 3600)
-    .slice(0, 24)
-    .map(normalise)
 }
 
 function normalise(v) {
@@ -70,12 +36,36 @@ function normalise(v) {
   }
 }
 
-// GET /api/search?q=...&limit=20
+async function tryInstances(buildUrl) {
+  const errors = []
+  for (let i = 0; i < INSTANCES.length; i++) {
+    const idx  = (instanceIdx + i) % INSTANCES.length
+    const base = INSTANCES[idx]
+    try {
+      const res = await fetchWithTimeout(buildUrl(base))
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      instanceIdx = idx // stick to working instance
+      return data
+    } catch (err) {
+      errors.push(`${base}: ${err.message}`)
+    }
+  }
+  throw new Error(`All instances failed: ${errors.join(' | ')}`)
+}
+
+// GET /api/search?q=...
 router.get('/', async (req, res, next) => {
   const { q, limit = 20 } = req.query
-  if (!q?.trim()) return res.status(400).json({ error: 'Missing query param: q' })
+  if (!q?.trim()) return res.status(400).json({ error: 'Missing param: q' })
   try {
-    const results = await searchInvidious(q.trim(), parseInt(limit))
+    const data = await tryInstances(base =>
+      `${base}/api/v1/search?q=${encodeURIComponent(q.trim())}&type=video&fields=videoId,title,author,lengthSeconds,videoThumbnails`
+    )
+    const results = data
+      .filter(v => v.videoId && v.lengthSeconds > 0 && v.lengthSeconds < 3600)
+      .slice(0, parseInt(limit) || 20)
+      .map(normalise)
     res.json({ results })
   } catch (err) {
     next(err)
@@ -85,7 +75,13 @@ router.get('/', async (req, res, next) => {
 // GET /api/search/trending
 router.get('/trending', async (req, res, next) => {
   try {
-    const results = await getTrending()
+    const data = await tryInstances(base =>
+      `${base}/api/v1/trending?type=music&fields=videoId,title,author,lengthSeconds,videoThumbnails`
+    )
+    const results = data
+      .filter(v => v.videoId && v.lengthSeconds < 3600)
+      .slice(0, 24)
+      .map(normalise)
     res.json({ results })
   } catch (err) {
     next(err)
