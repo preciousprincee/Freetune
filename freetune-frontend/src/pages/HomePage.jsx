@@ -73,8 +73,7 @@ export default function HomePage() {
     if (downloading[t.videoId]) return
     setDownloading(d => ({ ...d, [t.videoId]: true }))
     try {
-      const blob   = await triggerDownload(t.videoId, t.title)
-      const blobUrl = URL.createObjectURL(blob)
+      const blobUrl = await triggerDownload(t.videoId, t.title)
       addToLibrary({ ...t, addedAt: Date.now(), blobUrl })
     } catch (err) {
       console.error('Download failed:', err.message)
@@ -124,7 +123,7 @@ export default function HomePage() {
             </button>
 
             {showCountries && (
-              <div className="absolute right-0 top-9 w-52 bg-elevated border border-subtle rounded-xl shadow-2xl z-50 py-1 max-h-72 overflow-y-auto animate-fade-in">
+              <div className="absolute right-0 top-9 w-52 bg-elevated border border-subtle rounded-xl shadow-2xl z-[60] py-1 max-h-72 overflow-y-auto animate-fade-in">
                 {COUNTRIES.map(c => (
                   <button key={c.code} onClick={() => selectCountry(c.code)}
                     className={`w-full text-left px-4 py-2.5 text-sm hover:bg-subtle flex items-center justify-between ${regionCode === c.code ? 'text-green font-semibold' : ''}`}>
