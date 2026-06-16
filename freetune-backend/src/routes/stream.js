@@ -25,9 +25,11 @@ router.get('/:videoId', (req, res) => {
   }
 
   res.setHeader('Content-Type', 'audio/mpeg')
-  res.setHeader('Transfer-Encoding', 'chunked')
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Headers', 'Range')
+  res.setHeader('Accept-Ranges', 'none')
+  res.setHeader('X-Content-Type-Options', 'nosniff')
 
   // Pipe yt-dlp stdout → HTTP response
   proc.stdout.pipe(res)

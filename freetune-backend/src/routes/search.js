@@ -59,11 +59,12 @@ router.get('/', async (req, res, next) => {
   }
 })
 
-// GET /api/search/trending
+// GET /api/search/trending?regionCode=US
 router.get('/trending', async (req, res, next) => {
   try {
-    const key = getKey()
-    const url = `${YT_API}/videos?part=snippet&chart=mostPopular&videoCategoryId=10&maxResults=24&key=${key}`
+    const key        = getKey()
+    const regionCode = (req.query.regionCode || 'US').toUpperCase().slice(0, 2)
+    const url = `${YT_API}/videos?part=snippet&chart=mostPopular&videoCategoryId=10&maxResults=24&regionCode=${regionCode}&key=${key}`
     const response = await fetchWithTimeout(url)
     if (!response.ok) {
       const err = await response.json().catch(() => ({}))
@@ -71,7 +72,7 @@ router.get('/trending', async (req, res, next) => {
     }
     const data    = await response.json()
     const results = (data.items || []).map(item => normalise({ ...item, id: { videoId: item.id } }))
-    res.json({ results })
+    res.json({ results, regionCode })
   } catch (err) {
     next(err)
   }

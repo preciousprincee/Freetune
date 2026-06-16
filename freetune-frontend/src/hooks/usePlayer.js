@@ -11,6 +11,7 @@ import { getSong } from '../utils/db'
 
 export function usePlayer() {
   const audioRef = useRef(null)
+  const isLoadingRef = useRef(false)
   const {
     currentTrack, isPlaying, volume,
     setIsPlaying, setProgress, setDuration, setAudioEl, playNext,
@@ -18,9 +19,9 @@ export function usePlayer() {
 
   // Create audio element once on mount
   useEffect(() => {
-    const audio       = new Audio()
-    audio.preload     = 'auto'
-    audioRef.current  = audio
+    const audio      = new Audio()
+    audio.preload    = 'none'
+    audioRef.current = audio
     setAudioEl(audio)
 
     const onTimeUpdate = () => {
@@ -28,7 +29,7 @@ export function usePlayer() {
         setProgress(audio.currentTime / audio.duration)
       }
     }
-    const onMeta  = () => {
+    const onMeta = () => {
       if (!isNaN(audio.duration)) setDuration(audio.duration)
     }
     const onEnded = () => {
@@ -42,14 +43,11 @@ export function usePlayer() {
     }
     const onError = () => {
       console.error('[player] Audio error code:', audio.error?.code, audio.error?.message)
+      isLoadingRef.current = false
       setIsPlaying(false)
     }
-    const onCanPlay = () => {
-      console.log('[player] canplay fired — attempting play')
-      audio.play().catch(err => {
-        console.error('[player] play() failed:', err.message)
-        setIsPlaying(false)
-      })
+    const onPlaying = () => {
+      isLoadingRef.current = false
     }
 
     audio.addEventListener('timeupdate',     onTimeUpdate)
@@ -57,7 +55,7 @@ export function usePlayer() {
     audio.addEventListener('durationchange', onMeta)
     audio.addEventListener('ended',          onEnded)
     audio.addEventListener('error',          onError)
-    audio.addEventListener('canplay',        onCanPlay)
+    audio.addEventListener('playing',        onPlaying)
 
     return () => {
       audio.pause()
@@ -67,7 +65,7 @@ export function usePlayer() {
       audio.removeEventListener('durationchange', onMeta)
       audio.removeEventListener('ended',          onEnded)
       audio.removeEventListener('error',          onError)
-      audio.removeEventListener('canplay',        onCanPlay)
+      audio.removeEventListener('playing',        onPlaying)
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -77,12 +75,12 @@ export function usePlayer() {
     if (!audio || !currentTrack) return
 
     let cancelled = false
+    isLoadingRef.current = true
 
     async function load() {
       audio.pause()
       setProgress(0)
       setDuration(0)
-      setIsPlaying(true)
 
       // Check IndexedDB for downloaded version first
       let src = null
@@ -110,17 +108,24 @@ export function usePlayer() {
 
       audio.src = src
       audio.load()
-      // canplay listener above will trigger play()
+
+      try {
+        await audio.play()
+        if (!cancelled) setIsPlaying(true)
+      } catch (err) {
+        console.error('[player] play() failed on load:', err.message)
+        if (!cancelled) setIsPlaying(false)
+      }
     }
 
     load()
     return () => { cancelled = true }
   }, [currentTrack?.videoId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Sync play/pause state
+  // Sync play/pause — only when NOT in the middle of loading a new track
   useEffect(() => {
     const audio = audioRef.current
-    if (!audio || !audio.src) return
+    if (!audio || !audio.src || isLoadingRef.current) return
     if (isPlaying) {
       audio.play().catch(err => {
         console.error('[player] play() error:', err.message)
