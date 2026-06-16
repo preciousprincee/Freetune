@@ -1,18 +1,19 @@
+/**
+ * routes/search.js
+ * YouTube Data API v3 — free, 10,000 requests/day, no bot blocking.
+ * Requires YOUTUBE_API_KEY environment variable.
+ */
 const router = require('express').Router()
 const fetch  = require('node-fetch')
 
-const INSTANCES = [
-  'https://inv.thepixora.com',
-  'https://yt.chocolatemoo53.com',
-  'https://invidious.tiekoetter.com',
-  'https://invidious.f5.si',
-  'https://invidious.nerdvpn.de',
-  'https://inv.nadeko.net',
-]
+const YT_API = 'https://www.googleapis.com/youtube/v3'
 
-let instanceIdx = 0
+function getKey() {
+  const key = process.env.YOUTUBE_API_KEY
+  if (!key) throw new Error('YOUTUBE_API_KEY not set in environment variables')
+  return key
+}
 
-// node-fetch v2 doesn't support {timeout} — use AbortController instead
 async function fetchWithTimeout(url, ms = 8000) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), ms)
@@ -24,50 +25,34 @@ async function fetchWithTimeout(url, ms = 8000) {
   }
 }
 
-function normalise(v) {
-  const thumbs = v.videoThumbnails || []
-  const thumb  = thumbs.find(t => t.quality === 'medium')
-    || thumbs.find(t => t.quality === 'default')
-    || thumbs[0]
+function normalise(item) {
+  const snippet = item.snippet || {}
+  const id      = item.id?.videoId || item.id
+  const thumbs  = snippet.thumbnails || {}
+  const thumb   = thumbs.medium?.url || thumbs.default?.url || `https://i.ytimg.com/vi/${id}/mqdefault.jpg`
   return {
-    videoId:   v.videoId,
-    title:     v.title  || 'Unknown',
-    artist:    v.author || 'Unknown',
-    duration:  v.lengthSeconds || 0,
-    thumbnail: thumb?.url || `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`,
+    videoId:   id,
+    title:     snippet.title   || 'Unknown',
+    artist:    snippet.channelTitle || 'Unknown',
+    duration:  0,
+    thumbnail: thumb,
   }
 }
 
-async function tryInstances(buildUrl) {
-  const errors = []
-  for (let i = 0; i < INSTANCES.length; i++) {
-    const idx  = (instanceIdx + i) % INSTANCES.length
-    const base = INSTANCES[idx]
-    try {
-      const res = await fetchWithTimeout(buildUrl(base))
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      instanceIdx = idx // stick to working instance
-      return data
-    } catch (err) {
-      errors.push(`${base}: ${err.message}`)
-    }
-  }
-  throw new Error(`All instances failed: ${errors.join(' | ')}`)
-}
-
-// GET /api/search?q=...
+// GET /api/search?q=...&limit=20
 router.get('/', async (req, res, next) => {
   const { q, limit = 20 } = req.query
   if (!q?.trim()) return res.status(400).json({ error: 'Missing param: q' })
   try {
-    const data = await tryInstances(base =>
-      `${base}/api/v1/search?q=${encodeURIComponent(q.trim())}&type=video&fields=videoId,title,author,lengthSeconds,videoThumbnails`
-    )
-    const results = data
-      .filter(v => v.videoId && v.lengthSeconds > 0 && v.lengthSeconds < 3600)
-      .slice(0, parseInt(limit) || 20)
-      .map(normalise)
+    const key = getKey()
+    const url = `${YT_API}/search?part=snippet&type=video&videoCategoryId=10&q=${encodeURIComponent(q.trim())}&maxResults=${Math.min(parseInt(limit)||20, 50)}&key=${key}`
+    const response = await fetchWithTimeout(url)
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      throw new Error(err?.error?.message || `YouTube API HTTP ${response.status}`)
+    }
+    const data    = await response.json()
+    const results = (data.items || []).map(normalise)
     res.json({ results })
   } catch (err) {
     next(err)
@@ -77,13 +62,15 @@ router.get('/', async (req, res, next) => {
 // GET /api/search/trending
 router.get('/trending', async (req, res, next) => {
   try {
-    const data = await tryInstances(base =>
-      `${base}/api/v1/trending?type=music&fields=videoId,title,author,lengthSeconds,videoThumbnails`
-    )
-    const results = data
-      .filter(v => v.videoId && v.lengthSeconds < 3600)
-      .slice(0, 24)
-      .map(normalise)
+    const key = getKey()
+    const url = `${YT_API}/videos?part=snippet&chart=mostPopular&videoCategoryId=10&maxResults=24&key=${key}`
+    const response = await fetchWithTimeout(url)
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}))
+      throw new Error(err?.error?.message || `YouTube API HTTP ${response.status}`)
+    }
+    const data    = await response.json()
+    const results = (data.items || []).map(item => normalise({ ...item, id: { videoId: item.id } }))
     res.json({ results })
   } catch (err) {
     next(err)
