@@ -2,10 +2,12 @@ const router = require('express').Router()
 const fetch  = require('node-fetch')
 
 const INSTANCES = [
-  'https://inv.nadeko.net',
+  'https://inv.thepixora.com',
+  'https://yt.chocolatemoo53.com',
+  'https://invidious.tiekoetter.com',
+  'https://invidious.f5.si',
   'https://invidious.nerdvpn.de',
-  'https://invidious.privacydev.net',
-  'https://vid.puffyan.us',
+  'https://inv.nadeko.net',
 ]
 
 let instanceIdx = 0
