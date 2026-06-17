@@ -1,9 +1,8 @@
 /**
  * utils/api.js — All HTTP calls to the FreeTune backend.
  * Base URL from VITE_API_URL env variable (set in Vercel dashboard).
- * Falls back to the production backend so streaming always works cross-origin.
  */
-const BASE = import.meta.env.VITE_API_URL || 'https://freetune-backend.onrender.com'
+const BASE = import.meta.env.VITE_API_URL || ''
 
 export async function apiSearch(query, limit = 20) {
   const res = await fetch(`${BASE}/api/search?q=${encodeURIComponent(query)}&limit=${limit}`)
@@ -13,10 +12,7 @@ export async function apiSearch(query, limit = 20) {
 }
 
 export async function apiTrending(regionCode = 'US') {
-  const res = await fetch(
-    `${BASE}/api/search/trending?regionCode=${encodeURIComponent(regionCode)}&_=${Date.now()}`,
-    { cache: 'no-store' }
-  )
+  const res = await fetch(`${BASE}/api/search/trending?regionCode=${encodeURIComponent(regionCode)}`)
   if (!res.ok) throw new Error(`Trending failed: ${res.status}`)
   const { results } = await res.json()
   return results
@@ -29,7 +25,7 @@ export function streamUrl(videoId) {
 
 /**
  * Downloads audio as a blob and triggers browser "Save file" dialog.
- * Returns the blobUrl so callers can reuse it (e.g. for offline playback).
+ * Using blob approach instead of direct anchor click to work cross-origin.
  */
 export async function triggerDownload(videoId, title) {
   const url = `${BASE}/api/download/${videoId}?title=${encodeURIComponent(title)}`
@@ -44,8 +40,8 @@ export async function triggerDownload(videoId, title) {
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
-    // Return blobUrl so caller can store it; revocation is caller's responsibility
-    return blobUrl
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 10000)
+    return blob
   } catch (err) {
     console.error('[download] Failed:', err.message)
     throw err

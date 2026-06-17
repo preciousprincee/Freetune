@@ -4,7 +4,10 @@
  *
  * Same as /stream but sets Content-Disposition: attachment
  * so the browser saves the file instead of playing inline.
- * The MP3 is piped directly — never stored on the server.
+ * The audio is piped directly — never stored on the server.
+ *
+ * File extension matches the actual format streamed: .mp3 when ffmpeg
+ * is available, .m4a otherwise (see ytdlp.js).
  */
 const router = require('express').Router()
 const { getAudioStream } = require('../ytdlp')
@@ -18,19 +21,23 @@ router.get('/:videoId', (req, res) => {
     return res.status(400).json({ error: 'Invalid video ID' })
   }
 
-  let proc
+  let proc, contentType
   try {
-    proc = getAudioStream(videoId)
+    ;({ proc, contentType } = getAudioStream(videoId))
   } catch (err) {
     console.error('[download] Failed to start yt-dlp:', err.message)
     return res.status(503).json({ error: 'Audio service unavailable: ' + err.message })
   }
 
-  res.setHeader('Content-Type', 'audio/mpeg')
-  res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.mp3"`)
+  const ext = contentType === 'audio/mpeg' ? 'mp3' : 'm4a'
+
+  res.setHeader('Content-Type', contentType)
+  res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.${ext}"`)
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Access-Control-Allow-Origin', '*')
 
+  let bytesWritten = false
+  proc.stdout.once('data', () => { bytesWritten = true })
   proc.stdout.pipe(res)
 
   req.on('close', () => {
@@ -46,6 +53,9 @@ router.get('/:videoId', (req, res) => {
   proc.on('close', code => {
     if (code !== 0 && code !== null) {
       console.error(`[download] yt-dlp exited with code ${code}`)
+      if (!bytesWritten && !res.headersSent) {
+        return res.status(502).json({ error: 'Could not retrieve audio for this video. It may be region-locked, age-restricted, or blocked by YouTube.' })
+      }
     }
     res.end()
   })
