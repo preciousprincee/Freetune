@@ -53,6 +53,7 @@ router.get('/', async (req, res, next) => {
     }
     const data    = await response.json()
     const results = (data.items || []).map(normalise)
+    res.setHeader('Cache-Control', 'no-store')
     res.json({ results })
   } catch (err) {
     next(err)
@@ -72,6 +73,8 @@ router.get('/trending', async (req, res, next) => {
     }
     const data    = await response.json()
     const results = (data.items || []).map(item => normalise({ ...item, id: { videoId: item.id } }))
+    // Prevent CDN/browser caching so different regionCodes always get fresh results
+    res.setHeader('Cache-Control', 'no-store')
     res.json({ results, regionCode })
   } catch (err) {
     next(err)

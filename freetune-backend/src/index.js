@@ -10,15 +10,17 @@ console.log(`[startup] FreeTune API starting on port ${PORT}`)
 console.log(`[startup] Node version: ${process.version}`)
 console.log(`[startup] Allowed origins: ${process.env.ALLOWED_ORIGINS || 'ALL (open)'}`)
 
+// ── Trust proxy (required on Render/Railway/Heroku behind a load balancer) ──
+// Fixes: ERR_ERL_UNEXPECTED_X_FORWARDED_FOR from express-rate-limit
+app.set('trust proxy', 1)
+
 // ── CORS ────────────────────────────────────────────────────────────────────
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',').map(o => o.trim()).filter(Boolean)
 
 app.use(cors({
   origin: (origin, cb) => {
-    // Allow requests with no origin (curl, Postman, mobile apps)
     if (!origin) return cb(null, true)
-    // Allow all if no restriction set
     if (allowedOrigins.length === 0) return cb(null, true)
     if (allowedOrigins.includes(origin)) return cb(null, true)
     console.warn(`[cors] Blocked origin: ${origin}`)
