@@ -1,8 +1,11 @@
+/**
+ * routes/download.js
+ * Fetches audio via @distube/ytdl-core, converts to MP3 via ffmpeg on the fly.
+ */
 const router       = require('express').Router()
 const { spawn }    = require('child_process')
 const { execSync } = require('child_process')
-const { Readable } = require('stream')
-const { getAudioUrl } = require('../piped')
+const ytdl         = require('@distube/ytdl-core')
 
 function getFfmpegBin() {
   try { return execSync('which ffmpeg', { encoding: 'utf8' }).trim() || 'ffmpeg' }
@@ -17,25 +20,20 @@ router.get('/:videoId', async (req, res) => {
   if (!videoId || !/^[\w-]{11}$/.test(videoId))
     return res.status(400).json({ error: 'Invalid video ID' })
 
-  let audioUrl
+  let info
   try {
-    ;({ url: audioUrl } = await getAudioUrl(videoId))
+    info = await ytdl.getInfo(`https://www.youtube.com/watch?v=${videoId}`)
   } catch (err) {
-    console.error('[download] Piped failed:', err.message)
-    return res.status(503).json({ error: 'Could not resolve audio stream. Try again.' })
+    console.error('[download] getInfo failed:', err.message)
+    return res.status(503).json({ error: 'Could not resolve audio. Try again.' })
   }
 
-  let upstream
-  try {
-    upstream = await fetch(audioUrl, {
-      signal: AbortSignal.timeout(15000),
-      headers: { 'User-Agent': 'Mozilla/5.0', Referer: 'https://www.youtube.com/' },
-    })
-    if (!upstream.ok) throw new Error(`Upstream HTTP ${upstream.status}`)
-  } catch (err) {
-    console.error('[download] Upstream fetch failed:', err.message)
-    return res.status(502).json({ error: 'Failed to fetch audio' })
-  }
+  const format = ytdl.chooseFormat(info.formats, {
+    quality: 'highestaudio',
+    filter: 'audioonly',
+  })
+
+  const audioStream = ytdl.downloadFromInfo(info, { format })
 
   const ffmpeg = spawn(getFfmpegBin(), [
     '-i', 'pipe:0',
@@ -54,10 +52,11 @@ router.get('/:videoId', async (req, res) => {
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Access-Control-Allow-Origin', '*')
 
-  Readable.fromWeb(upstream.body).pipe(ffmpeg.stdin)
+  audioStream.pipe(ffmpeg.stdin)
   ffmpeg.stdout.pipe(res)
 
   req.on('close', () => {
+    try { audioStream.destroy() } catch {}
     try { ffmpeg.kill('SIGTERM') } catch {}
   })
 
